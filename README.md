@@ -31,36 +31,128 @@
 
 ## 실행 방법
 
-### 사전 준비: Docker로 PostgreSQL 실행
+### 사전 요구사항
+
+| 실행 방법 | 필요 도구 |
+|-----------|-----------|
+| Docker (권장) | [Docker Desktop](https://www.docker.com/products/docker-desktop/) |
+| 로컬 직접 실행 | [Docker Desktop](https://www.docker.com/products/docker-desktop/) + [Java 21](https://adoptium.net/) |
+
+> Docker Desktop이 실행 중이어야 `docker` 명령어가 동작합니다.
+
+#### 포트 충돌 확인 (실행 전)
+
+본 프로젝트는 **8080 (앱)**, **5432 (PostgreSQL)** 포트를 사용합니다.  
+이미 사용 중인 포트가 있으면 컨테이너가 실행되지 않으니 아래 명령어로 미리 확인하세요.
 
 ```bash
+# Mac / Linux
+lsof -i :8080
+lsof -i :5432
+
+# Windows (PowerShell)
+netstat -ano | findstr :8080
+netstat -ano | findstr :5432
+```
+
+출력 결과가 있으면 해당 프로세스를 종료하거나, `docker-compose.yml`의 포트 번호를 변경하세요.
+
+```yaml
+# docker-compose.yml 포트 변경 예시 (왼쪽이 호스트 포트)
+ports:
+  - "8081:8080"   # 8081로 변경 시 http://localhost:8081 로 접속
+```
+
+---
+
+### Docker로 한 번에 실행 (권장)
+
+```bash
+# 1. 저장소 클론
+git clone <repository-url>
+cd liveklass
+
+# 2. 실행
 docker compose up -d
 ```
 
-`postgres:15` 컨테이너가 `localhost:5432`로 실행됩니다.  
-DB/계정 설정은 `docker-compose.yml` 참고 (기본값: postgres/postgres/liveklass).
-
-### 애플리케이션 실행
+PostgreSQL + Spring Boot 앱이 함께 실행됩니다.  
+앱 시작까지 약 30~60초 소요됩니다 (PostgreSQL 준비 완료 후 앱이 자동 기동).
 
 ```bash
-./gradlew bootRun
+# 기동 완료 확인 (아래 메시지가 보이면 준비 완료)
+docker compose logs app | grep "Started LiveKlassApplication"
 ```
 
-서버 기동 시 시드 데이터가 자동 생성됩니다:
-
-| ID | username | role |
-|----|----------|------|
-| 1 | creator1 | CREATOR |
-| 2 | creator2 | CREATOR |
-| 3 | student1 | CLASSMATE |
-| 4 | student2 | CLASSMATE |
-| 5 | student3 | CLASSMATE |
-
-### Swagger UI
+**기동 완료 후 Swagger UI에서 API를 바로 테스트할 수 있습니다:**
 
 ```
 http://localhost:8080/swagger-ui/index.html
 ```
+
+또는 빠른 동작 확인:
+
+```bash
+curl http://localhost:8080/api/courses
+```
+
+```bash
+# 상태 확인
+docker compose ps
+
+# 전체 로그 확인
+docker compose logs -f app
+```
+
+---
+
+### 로컬 개발 환경에서 실행 (IntelliJ / Gradle)
+
+> **PostgreSQL을 먼저 실행해야 합니다.** DB 없이 앱을 실행하면 `Connection refused` 에러가 발생합니다.
+
+```bash
+# 1. PostgreSQL 먼저 실행 (필수)
+docker compose up -d postgres
+
+# 2. postgres가 healthy 상태인지 확인
+docker compose ps
+
+# 3. 앱 실행
+./gradlew bootRun        # Mac / Linux
+gradlew.bat bootRun      # Windows
+```
+
+IntelliJ에서는 `docker compose up -d postgres` 실행 후 `LiveKlassApplication.java`의 ▶ 버튼으로 실행해도 됩니다.
+
+---
+
+### 종료
+
+```bash
+docker compose down          # 컨테이너 중지 및 제거
+docker compose down -v       # 볼륨(DB 데이터)까지 완전 삭제
+```
+
+---
+
+서버 최초 기동 시 시드 데이터가 자동 생성됩니다 (이미 데이터가 있으면 건너뜀):
+
+**사용자 (20명)**
+
+| ID | username | role |
+|----|----------|------|
+| 1 ~ 5 | creator1 ~ creator5 | CREATOR |
+| 6 ~ 20 | student1 ~ student15 | CLASSMATE |
+
+**강의 (5개)**
+
+| ID | 제목 | 상태 | 정원 |
+|----|------|------|------|
+| 1 | 실시간 Java 마스터 클래스 | OPEN | 10 |
+| 2 | Spring Boot JPA 심화 과정 | OPEN | 2 (만석 + 대기열) |
+| 3 | 초보자를 위한 HTML/CSS 기초 | DRAFT | 30 |
+| 4 | React & Next.js 프론트엔드 실무 | CLOSED | 20 |
+| 5 | 알고리즘 및 자료구조 코딩테스트 | OPEN | 5 |
 
 ---
 
@@ -74,7 +166,7 @@ http://localhost:8080/swagger-ui/index.html
 | 취소 기간 | CONFIRMED 후 7일 이내만 취소 가능. PENDING은 기간 제한 없이 취소 가능 |
 | 정원 계산 | PENDING + CONFIRMED 상태 수강 신청 수를 기준으로 정원 체크 (CANCELLED 제외) |
 | 동시성 | 마지막 자리 경합 시 비관적 락으로 정원 초과 방지 |
-| 사용자 등록 | API 미구현, 시드 데이터로 대체 |
+| 사용자 등록 | `POST /api/users`로 CREATOR/CLASSMATE 계정 직접 생성 가능 (시드 데이터 병행) |
 
 ---
 
@@ -116,7 +208,17 @@ com.samintech.liveklass
 
 계층별 분리(controller/service/repository)보다 도메인별 응집도가 높아 기능 수정 시 파일 탐색 범위가 좁습니다.
 
-### 4. N+1 쿼리 방지 — 배치 COUNT 쿼리
+### 4. 취소 후 재신청 — DB 유니크 제약 우회
+
+`enrollments` 테이블에는 `(user_id, course_id)` 복합 유니크 제약이 있습니다. 취소 후 재신청 시 새 row를 INSERT하면 제약 위반이 발생하므로, 기존 `CANCELLED` row를 재활성화(`reactivate()`)하는 방식으로 처리합니다.
+
+```
+재신청 흐름:
+  기존 CANCELLED row 있음 → status=PENDING, enrolledAt=now(), confirmedAt=null, cancelledAt=null 로 갱신
+  기존 CANCELLED row 없음 → 새 row INSERT
+```
+
+### 5. N+1 쿼리 방지 — 배치 COUNT 쿼리
 
 강의 목록 조회(`getCourses`) 시 각 강의별 신청 인원을 개별 쿼리로 조회하는 대신, 하나의 GROUP BY 쿼리로 한 번에 처리합니다.
 
@@ -127,6 +229,19 @@ SELECT e.course_id, COUNT(e.*) FROM enrollments e
 WHERE e.course_id IN (?, ?, ...) AND e.status IN ('PENDING', 'CONFIRMED')
 GROUP BY e.course_id
 ```
+### 6. 만료 강의 자동 CLOSED — 2-레이어 방어
+
+스케줄러 단독은 서버 다운 중 누락이 발생하므로 두 가지를 함께 사용합니다.
+
+```
+레이어 1 (서버 재기동 시) — CourseExpiryCloser
+  endDate가 지난 OPEN 강의를 일괄 CLOSED로 전환
+  → 서버 중단 기간의 누락분을 재기동 시 즉시 보완
+
+레이어 2 (수강 신청 요청 시) — EnrollmentService.enroll()
+  DB 상태와 무관하게 endDate < 오늘이면 COURSE_EXPIRED 반환
+  → 극단적인 레이스 컨디션 방어
+```
 
 ---
 
@@ -134,7 +249,6 @@ GROUP BY e.course_id
 
 | 항목 | 이유 |
 |------|------|
-| 사용자 등록 API | 시드 데이터(DataInitializer)로 대체 |
 | JWT 인증 | 과제에서 X-User-Id 헤더 방식 명시적으로 허용 |
 | 이메일/비밀번호 | User 엔티티가 username, role만 보유 |
 
@@ -142,33 +256,81 @@ GROUP BY e.course_id
 
 ## AI 활용 범위
 
-Claude (claude-sonnet-4-6)를 활용하여 전체 프로젝트 골격 생성 및 코드 리뷰를 진행했습니다.
+본 프로젝트는 **Claude (Anthropic)** 와의 AI 페어 프로그래밍 방식으로 개발되었습니다.
 
-**AI가 생성한 주요 결과물**
-- 엔티티, 서비스, 컨트롤러, 리포지토리 전체 구조
-- 테스트 코드 (단위 + 통합 + 동시성)
-- 오류 처리 공통 구조 (GlobalExceptionHandler, ErrorCode)
+### 본인 기여
 
-**직접 검토·결정한 사항**
-- 비관적 락 vs 낙관적 락 트레이드오프 이해 후 비관적 락 선택
-- 상태 전이 검증 위치 (서비스 vs 엔티티) → 엔티티 내부 결정
-- 취소 가능 기간 규칙 (PENDING vs CONFIRMED 분기 처리)
-- UserRole 기반 접근 제어 범위 결정
-- 테스트 케이스 경계값 및 시나리오 검토
+| 영역 | 내용 |
+|------|------|
+| 프로젝트 초기 설정 | Spring Boot 프로젝트 구성, 의존성 선택, Gradle 설정 |
+| 기술 스택 결정 | Java 21, Spring Data JPA, PostgreSQL(운영) + H2(테스트), X-User-Id 헤더 인증 방식 채택 |
+| 요구사항 해석 | 정원 초과 시 대기열 등록, 취소 후 7일 정책, FIFO 승격 방식 등 비즈니스 정책 결정 |
+| 코드 리뷰 | 구현 결과물 검토, 버그 3건 발견(재신청 유니크 위반 / 동시 취소 대기열 누락 / N+1) 및 수정 지시 |
+| 성능 개선 식별 | 강의 단건 조회 시 Creator 지연 로딩으로 인한 쿼리 3회 발생 문제를 발견하고 `findByIdWithCreator()` 도입 지시 |
+| 시드 데이터 설계 | 대기열 포화 시나리오, 페이지네이션 검증용 다수 신청 등 테스트 시나리오 직접 설계 |
+| API 검증 | Swagger UI를 통한 전체 플로우(생성→OPEN→신청→만석→취소→승격) 수동 검증 |
+| Docker 환경 | Docker Compose multi-stage 빌드 및 PostgreSQL healthcheck 구성 결정 |
+
+### AI 활용 내용
+
+| 영역 | 내용 |
+|------|------|
+| 비즈니스 로직 구현 | 엔티티 상태 머신, 서비스 레이어 전체, Repository 쿼리 작성 |
+| 테스트 코드 | 단위 테스트(Mockito), MockMvc 통합 테스트, 가상 스레드 동시성 테스트 |
+| DB 스키마 | DDL, 유니크 제약, 인덱스 설계 |
+| 문서화 | Swagger 설정, Javadoc, README 초안 |
 
 ---
 
 ## API 목록 및 예시
+
+### 사용자 API
+
+| Method | URL | 설명 | 필요 역할 |
+|--------|-----|------|-----------|
+| `POST` | `/api/users` | 사용자 등록 (CREATOR 또는 CLASSMATE) | 누구나 |
+
+#### 사용자 등록
+```http
+POST /api/users
+Content-Type: application/json
+
+{ "username": "newStudent", "role": "CLASSMATE" }
+```
+```json
+{ "success": true, "data": { "id": 6, "username": "newStudent", "role": "CLASSMATE" }, "message": null }
+```
+
+---
 
 ### 강의 API
 
 | Method | URL | 설명 | 필요 역할 |
 |--------|-----|------|-----------|
 | `POST` | `/api/courses` | 강의 등록 | CREATOR |
-| `GET` | `/api/courses?status=OPEN` | 강의 목록 (상태 필터 선택) | 누구나 |
+| `GET` | `/api/courses` | 강의 목록 (다중 필터 선택) | 누구나 |
 | `GET` | `/api/courses/{id}` | 강의 상세 | 누구나 |
+| `PATCH` | `/api/courses/{id}` | 강의 수정 (DRAFT 상태만) | CREATOR |
 | `PATCH` | `/api/courses/{id}/status` | 상태 변경 (본인 강의만) | CREATOR |
 | `GET` | `/api/courses/{id}/enrollments` | 수강생 목록 (본인 강의만) | CREATOR |
+
+#### 강의 목록 조회 (필터 파라미터)
+
+| 파라미터 | 타입 | 설명 | 예시 |
+|---------|------|------|------|
+| `status` | `DRAFT\|OPEN\|CLOSED` | 강의 상태 필터 | `?status=OPEN` |
+| `title` | `String` | 제목 키워드 검색 (대소문자 무관) | `?title=java` |
+| `minPrice` | `Integer` | 최소 가격 | `?minPrice=0` |
+| `maxPrice` | `Integer` | 최대 가격 | `?maxPrice=50000` |
+| `startDate` | `yyyy-MM-dd` | 강의 시작일 이후 | `?startDate=2026-06-01` |
+| `endDate` | `yyyy-MM-dd` | 강의 종료일 이전 | `?endDate=2026-12-31` |
+| `hasVacancies` | `Boolean` | `true`이면 빈 자리 있는 강의만 | `?hasVacancies=true` |
+
+```http
+GET /api/courses?status=OPEN&title=spring&minPrice=0&maxPrice=100000&hasVacancies=true
+```
+
+---
 
 #### 강의 등록
 ```http
@@ -235,7 +397,7 @@ Content-Type: application/json
 #### 수강 신청
 ```http
 POST /api/enrollments
-X-User-Id: 3
+X-User-Id: 6
 Content-Type: application/json
 
 { "courseId": 1 }
@@ -247,7 +409,7 @@ Content-Type: application/json
     "id": 1,
     "courseId": 1,
     "courseTitle": "Spring Boot 마스터",
-    "userId": 3,
+    "userId": 6,
     "username": "student1",
     "status": "PENDING",
     "enrolledAt": "2026-05-20T10:00:00",
@@ -261,13 +423,13 @@ Content-Type: application/json
 #### 결제 확정
 ```http
 PATCH /api/enrollments/1/confirm
-X-User-Id: 3
+X-User-Id: 6
 ```
 
 #### 수강 취소
 ```http
 DELETE /api/enrollments/1
-X-User-Id: 3
+X-User-Id: 6
 ```
 
 ---
@@ -279,14 +441,20 @@ X-User-Id: 3
 | `COURSE_NOT_FOUND` | 404 | 강의를 찾을 수 없습니다 |
 | `USER_NOT_FOUND` | 404 | 사용자를 찾을 수 없습니다 |
 | `ENROLLMENT_NOT_FOUND` | 404 | 수강 신청을 찾을 수 없습니다 |
-| `COURSE_NOT_ENROLLABLE` | 400 | 신청 가능한 강의가 아닙니다 (OPEN 상태 아님) |
-| `INVALID_STATUS_TRANSITION` | 400 | 유효하지 않은 상태 변경입니다 |
+| `COURSE_NOT_ENROLLABLE` | 400 | 신청 가능한 강의가 아닙니다 |
+| `COURSE_EXPIRED` | 400 | 수강 기간이 종료된 강의입니다 |
+| `COURSE_NOT_EDITABLE` | 400 | DRAFT 상태의 강의만 수정할 수 있습니다 |
+| `CAPACITY_BELOW_ENROLLED` | 400 | 현재 수강 인원보다 정원을 줄일 수 없습니다 |
+| `INVALID_STATUS_TRANSITION` | 400 | 강의 상태는 DRAFT→OPEN→CLOSED 순서로만 변경 가능합니다 |
 | `INVALID_DATE_RANGE` | 400 | 시작일은 종료일보다 이전이어야 합니다 |
 | `CANCEL_PERIOD_EXCEEDED` | 400 | 취소 가능 기간(결제 후 7일)이 지났습니다 |
 | `ENROLLMENT_NOT_CANCELLABLE` | 400 | 취소할 수 없는 수강 신청 상태입니다 |
-| `ENROLLMENT_NOT_CONFIRMABLE` | 400 | 결제 확정할 수 없는 수강 신청 상태입니다 |
-| `COURSE_FULL` | 409 | 강의 정원이 초과되었습니다 (현재 미사용 — 정원 초과 시 WAITLISTED로 등록) |
+| `ENROLLMENT_NOT_CONFIRMABLE` | 400 | 결제 확정할 수 없는 수강 신청 상태입니다 (기타) |
+| `ENROLLMENT_ALREADY_CONFIRMED` | 400 | 이미 결제 완료된 강의입니다 |
+| `ENROLLMENT_WAITLISTED_NOT_CONFIRMABLE` | 400 | 대기 중인 상태에서는 결제를 진행할 수 없습니다 |
+| `ENROLLMENT_CANCELLED_NOT_CONFIRMABLE` | 400 | 취소된 수강 신청은 결제할 수 없습니다 |
 | `ALREADY_ENROLLED` | 409 | 이미 신청한 강의입니다 |
+| `USER_ALREADY_EXISTS` | 409 | 이미 존재하는 사용자 이름입니다 |
 | `NOT_COURSE_CREATOR` | 403 | 강의 개설자만 접근할 수 있습니다 |
 | `NOT_ENROLLMENT_OWNER` | 403 | 본인의 수강 신청만 처리할 수 있습니다 |
 | `UNAUTHORIZED_ROLE` | 403 | 해당 작업을 수행할 권한이 없습니다 |
@@ -322,7 +490,7 @@ enrollments
   enrolled_at (TIMESTAMP, NOT NULL)   -- 대기열 진입 시간 기준 FIFO 정렬
   confirmed_at (TIMESTAMP)
   cancelled_at (TIMESTAMP)
-  UNIQUE (user_id, course_id)   -- 중복 신청 방지 (CANCELLED 후 재신청 시 DB 제약 주의)
+  UNIQUE (user_id, course_id)   -- 중복 신청 방지 (CANCELLED 후 재신청 시 새 INSERT 대신 기존 row reactivate)
 ```
 
 **대기열 정책**
@@ -354,6 +522,7 @@ users (1) ──< courses (1) ──< enrollments >── (1) users
 |---|---|---|---|
 | `LiveKlassApplicationTests` | 통합 | 1 | 애플리케이션 컨텍스트 로드 |
 | `CourseControllerTest` | MockMvc | 6 | API 요청/응답 형식, 유효성 검증 |
-| `CourseServiceTest` | 단위 | 10 | 강의 생성·조회·상태 변경, 역할 검증, 날짜 검증 |
-| `EnrollmentServiceTest` | 단위 | 13 | 신청·확정·취소·대기열 비즈니스 규칙, 역할 검증 |
+| `CourseServiceTest` | 단위 | 15 | 강의 생성·수정·조회·상태 변경·고급 필터, 역할 검증, 날짜 검증, 만료 강의 OPEN 차단 |
+| `EnrollmentServiceTest` | 단위 | 22 | 신청·확정·취소·대기열·재신청·동시취소·상태별 확정 오류, 역할 검증, 만료 강의 차단 |
 | `EnrollmentConcurrencyTest` | 통합 | 1 | 동시 신청 시 정원 초과 방지 (비관적 락) |
+| `UserServiceTest` | 단위 | 2 | 사용자 등록, 중복 username 거부 |

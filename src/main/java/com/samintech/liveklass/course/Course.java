@@ -13,8 +13,7 @@ import java.time.LocalDateTime;
 
 /**
  * 강의(Course) 도메인 엔티티
- * 크리에이터가 개설하는 강의 정보를 담고 있으며, 강의 상태(DRAFT, OPEN, CLOSED) 전이를 책임집니다.
- * 비즈니스 규칙(상태 전이 검증)을 도메인 내부에 두어 응집도를 높였습니다.
+ * 크리에이터가 개설하는 강의 정보를 담고 있으며, 강의 상태(DRAFT, OPEN, CLOSED)
  */
 @Entity
 @Table(name = "courses")
@@ -61,13 +60,27 @@ public class Course {
     private LocalDateTime updatedAt;
 
     /**
-     * 강의 상태를 변경합니다.
+     * 강의 상태를 변경
      * 외부(Service)에서 직접 상태값을 변경(setter)하지 않고, 이 메서드를 통해서만 변경하도록 하여
-     * 올바른 상태 전이(DRAFT -> OPEN, OPEN -> CLOSED)인지 엔티티 스스로 검증합니다.
+     * 올바른 상태 전이(DRAFT -> OPEN, OPEN -> CLOSED)인지 엔티티 스스로 검증
      *
      * @param newStatus 변경하고자 하는 새로운 상태
-     * @throws BusinessException 잘못된 상태 전이일 경우 예외 발생
+     * @throws BusinessException
      */
+    public boolean isExpired() {
+        return LocalDate.now().isAfter(this.endDate);
+    }
+
+    public void update(String title, String description, int price, int capacity,
+                       LocalDate startDate, LocalDate endDate) {
+        this.title = title;
+        this.description = description;
+        this.price = price;
+        this.capacity = capacity;
+        this.startDate = startDate;
+        this.endDate = endDate;
+    }
+
     public void transitionTo(CourseStatus newStatus) {
         if (!isValidTransition(this.status, newStatus)) {
             throw new BusinessException(ErrorCode.INVALID_STATUS_TRANSITION);
@@ -76,7 +89,7 @@ public class Course {
     }
 
     /**
-     * 유효한 상태 전이인지 확인합니다.
+     * 유효한 상태 전이인지 확인
      * - DRAFT (초안) -> OPEN (모집 중) : 가능
      * - OPEN (모집 중) -> CLOSED (모집 마감) : 가능
      * - 그 외 (예: DRAFT -> CLOSED, CLOSED -> OPEN 등) : 불가능

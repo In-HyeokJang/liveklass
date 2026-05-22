@@ -1,0 +1,8 @@
+.gradle/
+build/
+.git/
+.gitignore
+*.md
+docs/
+CLAUDE.md
+gradle.properties

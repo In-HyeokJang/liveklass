@@ -6,20 +6,35 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
 public interface CourseRepository extends JpaRepository<Course, Long> {
 
-    List<Course> findByStatus(CourseStatus status);
+    @Query("SELECT c FROM Course c WHERE " +
+           "(:status IS NULL OR c.status = :status) AND " +
+           "(:title IS NULL OR LOWER(c.title) LIKE LOWER(CONCAT('%', cast(:title as String), '%'))) AND " +
+           "(:minPrice IS NULL OR c.price >= :minPrice) AND " +
+           "(:maxPrice IS NULL OR c.price <= :maxPrice) AND " +
+           "(:startDate IS NULL OR c.startDate >= :startDate) AND " +
+           "(:endDate IS NULL OR c.endDate <= :endDate)")
+    List<Course> searchCourses(
+            @Param("status") CourseStatus status,
+            @Param("title") String title,
+            @Param("minPrice") Integer minPrice,
+            @Param("maxPrice") Integer maxPrice,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate
+    );
 
-    /**
-     * 정원 초과 동시 신청을 막기 위한 비관적 락(Pessimistic Lock) 메서드입니다.
-     * 데이터베이스 레벨에서 `SELECT ... FOR UPDATE` 쿼리가 실행되며,
-     * 트랜잭션이 끝날 때까지 다른 트랜잭션은 이 레코드를 수정하거나 같은 락을 얻을 수 없습니다.
-     * 이로 인해 동시에 여러 명이 마지막 자리를 신청하더라도 순차적으로 처리되어 정원 초과를 방지합니다.
-     */
+    List<Course> findByStatusAndEndDateBefore(CourseStatus status, LocalDate date);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT c FROM Course c WHERE c.id = :id")
     Optional<Course> findByIdWithLock(@Param("id") Long id);
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = "creator")
+    @Query("SELECT c FROM Course c WHERE c.id = :id")
+    Optional<Course> findByIdWithCreator(@Param("id") Long id);
 }

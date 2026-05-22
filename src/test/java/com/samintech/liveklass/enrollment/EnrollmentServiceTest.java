@@ -89,6 +89,38 @@ class EnrollmentServiceTest {
     }
 
     @Test
+    @DisplayName("CLOSED 상태 강의 신청 시 예외 발생")
+    void enroll_shouldThrowWhenCourseClosed() {
+        Course closedCourse = Course.builder()
+                .id(10L).creator(null).title("강의").description("설명")
+                .price(0).capacity(10)
+                .startDate(LocalDate.now().minusDays(10)).endDate(LocalDate.now().minusDays(1))
+                .status(CourseStatus.CLOSED).build();
+
+        given(courseRepository.findByIdWithLock(10L)).willReturn(Optional.of(closedCourse));
+
+        assertThatThrownBy(() -> enrollmentService.enroll(10L, 2L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.COURSE_NOT_ENROLLABLE.getMessage());
+    }
+
+    @Test
+    @DisplayName("수강 기간이 지난 강의(OPEN 상태이지만 endDate 경과) 신청 시 예외 발생")
+    void enroll_shouldThrowWhenCourseExpired() {
+        Course expiredCourse = Course.builder()
+                .id(10L).creator(null).title("강의").description("설명")
+                .price(0).capacity(10)
+                .startDate(LocalDate.now().minusDays(30)).endDate(LocalDate.now().minusDays(1))
+                .status(CourseStatus.OPEN).build(); // OPEN이지만 endDate 경과
+
+        given(courseRepository.findByIdWithLock(10L)).willReturn(Optional.of(expiredCourse));
+
+        assertThatThrownBy(() -> enrollmentService.enroll(10L, 2L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.COURSE_EXPIRED.getMessage());
+    }
+
+    @Test
     @DisplayName("정원 초과 시 대기열(WAITLISTED)로 등록")
     void enroll_shouldAddToWaitlistWhenFull() {
         given(courseRepository.findByIdWithLock(10L)).willReturn(Optional.of(openCourse));
@@ -104,6 +136,29 @@ class EnrollmentServiceTest {
         EnrollmentResponse result = enrollmentService.enroll(10L, 2L);
 
         assertThat(result.status()).isEqualTo(EnrollmentStatus.WAITLISTED);
+    }
+
+    @Test
+    @DisplayName("취소 후 재신청 시 기존 CANCELLED row를 재활성화")
+    void enroll_shouldReactivateCancelledEnrollment() {
+        Enrollment cancelled = Enrollment.builder()
+                .id(99L).user(student).course(openCourse)
+                .status(EnrollmentStatus.CANCELLED)
+                .enrolledAt(LocalDateTime.now().minusDays(5))
+                .cancelledAt(LocalDateTime.now().minusDays(1))
+                .build();
+
+        given(courseRepository.findByIdWithLock(10L)).willReturn(Optional.of(openCourse));
+        given(enrollmentRepository.existsByCourseIdAndUserIdAndStatusIn(any(), any(), any())).willReturn(false);
+        given(userRepository.findById(2L)).willReturn(Optional.of(student));
+        given(enrollmentRepository.countByCourseIdAndStatusIn(any(), any())).willReturn(0);
+        given(enrollmentRepository.findByCourseIdAndUserIdAndStatus(10L, 2L, EnrollmentStatus.CANCELLED))
+                .willReturn(Optional.of(cancelled));
+
+        EnrollmentResponse result = enrollmentService.enroll(10L, 2L);
+
+        assertThat(result.status()).isEqualTo(EnrollmentStatus.PENDING);
+        verify(enrollmentRepository, never()).save(any()); // 새 row INSERT 없음
     }
 
     @Test
@@ -159,7 +214,52 @@ class EnrollmentServiceTest {
 
         assertThatThrownBy(() -> enrollmentService.confirm(1L, 2L))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage(ErrorCode.ENROLLMENT_NOT_CONFIRMABLE.getMessage());
+                .hasMessage(ErrorCode.ENROLLMENT_ALREADY_CONFIRMED.getMessage());
+    }
+
+    @Test
+    @DisplayName("대기 중인 수강 신청 결제 확정 시 예외 발생")
+    void confirm_shouldThrowWhenWaitlisted() {
+        Enrollment waitlisted = Enrollment.builder()
+                .id(1L).user(student).course(openCourse)
+                .status(EnrollmentStatus.WAITLISTED)
+                .enrolledAt(LocalDateTime.now()).build();
+
+        given(enrollmentRepository.findById(1L)).willReturn(Optional.of(waitlisted));
+
+        assertThatThrownBy(() -> enrollmentService.confirm(1L, 2L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.ENROLLMENT_WAITLISTED_NOT_CONFIRMABLE.getMessage());
+    }
+
+    @Test
+    @DisplayName("취소된 수강 신청 결제 확정 시도 시 예외 발생")
+    void confirm_shouldThrowWhenCancelled() {
+        Enrollment cancelled = Enrollment.builder()
+                .id(1L).user(student).course(openCourse)
+                .status(EnrollmentStatus.CANCELLED)
+                .enrolledAt(LocalDateTime.now()).build();
+
+        given(enrollmentRepository.findById(1L)).willReturn(Optional.of(cancelled));
+
+        assertThatThrownBy(() -> enrollmentService.confirm(1L, 2L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.ENROLLMENT_CANCELLED_NOT_CONFIRMABLE.getMessage());
+    }
+
+    @Test
+    @DisplayName("타인의 수강 신청 결제 확정 시도 시 예외 발생")
+    void confirm_shouldThrowWhenNotOwner() {
+        Enrollment pending = Enrollment.builder()
+                .id(1L).user(student).course(openCourse)
+                .status(EnrollmentStatus.PENDING)
+                .enrolledAt(LocalDateTime.now()).build();
+
+        given(enrollmentRepository.findById(1L)).willReturn(Optional.of(pending));
+
+        assertThatThrownBy(() -> enrollmentService.confirm(1L, 999L)) // 다른 userId
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.NOT_ENROLLMENT_OWNER.getMessage());
     }
 
     @Test
@@ -253,6 +353,21 @@ class EnrollmentServiceTest {
     }
 
     @Test
+    @DisplayName("PENDING 취소 시 강의에 비관적 락을 획득하여 대기열 승격 보호")
+    void cancel_shouldAcquireLockOnCourseWhenCapacityFreed() {
+        Enrollment pending = Enrollment.builder()
+                .id(1L).user(student).course(openCourse)
+                .status(EnrollmentStatus.PENDING)
+                .enrolledAt(LocalDateTime.now()).build();
+
+        given(enrollmentRepository.findById(1L)).willReturn(Optional.of(pending));
+
+        enrollmentService.cancel(1L, 2L);
+
+        verify(courseRepository).findByIdWithLock(openCourse.getId());
+    }
+
+    @Test
     @DisplayName("타인의 수강 신청 취소 시도 시 예외 발생")
     void cancel_shouldThrowWhenNotOwner() {
         Enrollment pending = Enrollment.builder()
@@ -266,4 +381,32 @@ class EnrollmentServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.NOT_ENROLLMENT_OWNER.getMessage());
     }
+
+    @Test
+    @DisplayName("강의별 수강생 목록 조회 - 개설자가 아닌 사용자가 조회 시도 시 예외 발생")
+    void getCourseEnrollments_shouldThrowWhenNotCreator() {
+        given(courseRepository.findById(10L)).willReturn(Optional.of(openCourse));
+
+        assertThatThrownBy(() -> enrollmentService.getCourseEnrollments(10L, 999L)) // 개설자는 1L임
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.NOT_COURSE_CREATOR.getMessage());
+    }
+
+    @Test
+    @DisplayName("강의별 수강생 목록 조회 - 개설자가 조회 시 성공")
+    void getCourseEnrollments_shouldReturnListWhenCreator() {
+        Enrollment enrollment = Enrollment.builder()
+                .id(1L).user(student).course(openCourse)
+                .status(EnrollmentStatus.PENDING)
+                .enrolledAt(LocalDateTime.now()).build();
+
+        given(courseRepository.findById(10L)).willReturn(Optional.of(openCourse));
+        given(enrollmentRepository.findByCourseId(10L)).willReturn(List.of(enrollment));
+
+        List<EnrollmentResponse> result = enrollmentService.getCourseEnrollments(10L, 1L); // 개설자 1L
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).userId()).isEqualTo(student.getId());
+    }
 }
+

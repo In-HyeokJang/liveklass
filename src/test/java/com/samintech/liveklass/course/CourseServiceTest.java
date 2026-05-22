@@ -128,7 +128,7 @@ class CourseServiceTest {
                 .startDate(LocalDate.now().plusDays(1)).endDate(LocalDate.now().plusDays(30))
                 .status(CourseStatus.DRAFT).build();
 
-        given(courseRepository.findById(10L)).willReturn(Optional.of(draftCourse));
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(draftCourse));
         given(enrollmentRepository.countByCourseIdAndStatusIn(any(), any())).willReturn(0);
 
         CourseResponse result = courseService.updateStatus(10L, 1L, CourseStatus.OPEN);
@@ -139,7 +139,7 @@ class CourseServiceTest {
     @Test
     @DisplayName("본인이 아닌 사용자가 상태 변경 시도 시 예외 발생")
     void updateStatus_shouldThrowWhenNotCreator() {
-        given(courseRepository.findById(10L)).willReturn(Optional.of(openCourse));
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(openCourse));
 
         assertThatThrownBy(() -> courseService.updateStatus(10L, 2L, CourseStatus.CLOSED))
                 .isInstanceOf(BusinessException.class)
@@ -155,7 +155,7 @@ class CourseServiceTest {
                 .startDate(LocalDate.now().plusDays(1)).endDate(LocalDate.now().plusDays(30))
                 .status(CourseStatus.CLOSED).build();
 
-        given(courseRepository.findById(10L)).willReturn(Optional.of(closedCourse));
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(closedCourse));
 
         assertThatThrownBy(() -> courseService.updateStatus(10L, 1L, CourseStatus.OPEN))
                 .isInstanceOf(BusinessException.class)
@@ -165,21 +165,100 @@ class CourseServiceTest {
     @Test
     @DisplayName("강의 목록 조회 시 신청 인원이 포함된다")
     void getCourses_shouldIncludeEnrollmentCount() {
-        given(courseRepository.findByStatus(CourseStatus.OPEN)).willReturn(List.of(openCourse));
+        given(courseRepository.searchCourses(CourseStatus.OPEN, null, null, null, null, null)).willReturn(List.of(openCourse));
         Object[] row = {10L, 5L};
         given(enrollmentRepository.countByCourseIdsAndStatusIn(any(), any()))
                 .willReturn(java.util.Collections.singletonList(row));
 
-        List<CourseResponse> result = courseService.getCourses(CourseStatus.OPEN);
+        List<CourseResponse> result = courseService.getCourses(CourseStatus.OPEN, null, null, null, null, null, null);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).enrolledCount()).isEqualTo(5);
     }
 
     @Test
+    @DisplayName("고급 필터 조건에 맞게 강의 목록을 조회하고 남은 정원 필터를 처리한다")
+    void getCourses_advancedFilters_shouldWork() {
+        Course freeCourse = Course.builder()
+                .id(11L).creator(creator).title("무료 Java 기초").description("설명")
+                .price(0).capacity(5)
+                .startDate(LocalDate.now()).endDate(LocalDate.now().plusDays(30))
+                .status(CourseStatus.OPEN).build();
+
+        given(courseRepository.searchCourses(CourseStatus.OPEN, "Java", 0, 10000, null, null))
+                .willReturn(List.of(freeCourse));
+
+        Object[] row = {11L, 5L};
+        given(enrollmentRepository.countByCourseIdsAndStatusIn(any(), any()))
+                .willReturn(java.util.Collections.singletonList(row));
+
+        List<CourseResponse> result = courseService.getCourses(
+                CourseStatus.OPEN, "Java", 0, 10000, null, null, true);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("강의 수정 성공 - DRAFT 상태에서 제목/날짜 변경")
+    void updateCourse_shouldSucceed() {
+        Course draftCourse = Course.builder()
+                .id(10L).creator(creator).title("기존 제목").description("설명")
+                .price(10000).capacity(20)
+                .startDate(LocalDate.now().plusDays(5)).endDate(LocalDate.now().plusDays(30))
+                .status(CourseStatus.DRAFT).build();
+
+        CourseUpdateRequest request = new CourseUpdateRequest(
+                "새 제목", "새 설명", 20000, 15,
+                LocalDate.now().plusDays(7), LocalDate.now().plusDays(40));
+
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(draftCourse));
+        given(enrollmentRepository.countByCourseIdAndStatusIn(any(), any())).willReturn(0);
+
+        CourseResponse result = courseService.updateCourse(10L, 1L, request);
+
+        assertThat(result.title()).isEqualTo("새 제목");
+        assertThat(result.price()).isEqualTo(20000);
+    }
+
+    @Test
+    @DisplayName("OPEN 상태 강의 수정 시도 시 예외 발생")
+    void updateCourse_shouldThrowWhenNotDraft() {
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(openCourse));
+
+        CourseUpdateRequest request = new CourseUpdateRequest(
+                "제목", "설명", 0, 10,
+                LocalDate.now().plusDays(1), LocalDate.now().plusDays(30));
+
+        assertThatThrownBy(() -> courseService.updateCourse(10L, 1L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.COURSE_NOT_EDITABLE.getMessage());
+    }
+
+    @Test
+    @DisplayName("수강 인원보다 정원을 줄이려 할 때 예외 발생")
+    void updateCourse_shouldThrowWhenCapacityBelowEnrolled() {
+        Course draftCourse = Course.builder()
+                .id(10L).creator(creator).title("강의").description("설명")
+                .price(0).capacity(10)
+                .startDate(LocalDate.now().plusDays(1)).endDate(LocalDate.now().plusDays(30))
+                .status(CourseStatus.DRAFT).build();
+
+        CourseUpdateRequest request = new CourseUpdateRequest(
+                "강의", "설명", 0, 2,  // 정원을 2로 줄이려 함
+                LocalDate.now().plusDays(1), LocalDate.now().plusDays(30));
+
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(draftCourse));
+        given(enrollmentRepository.countByCourseIdAndStatusIn(any(), any())).willReturn(5); // 현재 5명 수강 중
+
+        assertThatThrownBy(() -> courseService.updateCourse(10L, 1L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.CAPACITY_BELOW_ENROLLED.getMessage());
+    }
+
+    @Test
     @DisplayName("강의 상세 조회 - 존재하지 않는 강의 예외")
     void getCourse_shouldThrowWhenNotFound() {
-        given(courseRepository.findById(999L)).willReturn(Optional.empty());
+        given(courseRepository.findByIdWithCreator(999L)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> courseService.getCourse(999L))
                 .isInstanceOf(BusinessException.class)
@@ -187,9 +266,26 @@ class CourseServiceTest {
     }
 
     @Test
+    @DisplayName("종료일이 지난 강의를 OPEN으로 변경 시도 시 예외 발생")
+    void updateStatus_shouldThrowWhenOpeningExpiredCourse() {
+        Course expiredCourse = Course.builder()
+                .id(10L).creator(creator).title("강의").description("설명")
+                .price(0).capacity(10)
+                .startDate(LocalDate.now().minusDays(30))
+                .endDate(LocalDate.now().minusDays(1)) // 어제 종료
+                .status(CourseStatus.DRAFT).build();
+
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(expiredCourse));
+
+        assertThatThrownBy(() -> courseService.updateStatus(10L, 1L, CourseStatus.OPEN))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.COURSE_EXPIRED.getMessage());
+    }
+
+    @Test
     @DisplayName("크리에이터 전용 수강생 목록 - 다른 사용자 접근 시 예외")
     void getCourseEnrollments_shouldThrowWhenNotCreator() {
-        given(courseRepository.findById(10L)).willReturn(Optional.of(openCourse));
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(openCourse));
 
         assertThatThrownBy(() -> courseService.updateStatus(10L, otherUser.getId(), CourseStatus.CLOSED))
                 .isInstanceOf(BusinessException.class)
