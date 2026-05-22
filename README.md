@@ -460,7 +460,7 @@ users (1) ──< courses (1) ──< enrollments >── (1) users
 |---|---|---|---|
 | `LiveKlassApplicationTests` | 통합 | 1 | 애플리케이션 컨텍스트 로드 |
 | `CourseControllerTest` | MockMvc | 6 | API 요청/응답 형식, 유효성 검증 |
-| `CourseServiceTest` | 단위 | 14 | 강의 생성·수정·조회·상태 변경·고급 필터, 역할 검증, 날짜 검증, 만료 강의 OPEN 차단 |
-| `EnrollmentServiceTest` | 단위 | 18 | 신청·확정·취소·대기열·재신청·동시취소·상태별 확정 오류, 역할 검증, 만료 강의 차단 |
+| `CourseServiceTest` | 단위 | 15 | 강의 생성·수정·조회·상태 변경·고급 필터, 역할 검증, 날짜 검증, 만료 강의 OPEN 차단 |
+| `EnrollmentServiceTest` | 단위 | 22 | 신청·확정·취소·대기열·재신청·동시취소·상태별 확정 오류, 역할 검증, 만료 강의 차단 |
 | `EnrollmentConcurrencyTest` | 통합 | 1 | 동시 신청 시 정원 초과 방지 (비관적 락) |
 | `UserServiceTest` | 단위 | 2 | 사용자 등록, 중복 username 거부 |
