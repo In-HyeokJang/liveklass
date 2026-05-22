@@ -11,6 +11,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * 수강 신청(Enrollment) 관련 REST API 엔드포인트.
+ *
+ * Base URL: {@code /api/enrollments}
+ * 인증은 {@code X-User-Id} 헤더로 처리합니다. 헤더가 없으면 400을 반환
+ */
 @RestController
 @RequestMapping("/api/enrollments")
 @RequiredArgsConstructor
@@ -30,6 +36,7 @@ public class EnrollmentController {
     @GetMapping("/my")
     public ResponseEntity<ApiResponse<Page<EnrollmentResponse>>> getMyEnrollments(
             @RequestHeader("X-User-Id") Long userId,
+            @org.springdoc.core.annotations.ParameterObject
             @PageableDefault(size = 10, sort = "enrolledAt", direction = Sort.Direction.DESC)
             Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(

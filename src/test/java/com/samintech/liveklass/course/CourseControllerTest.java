@@ -74,7 +74,7 @@ class CourseControllerTest {
                 1L, "강의", "설명", 10000, 20, 5,
                 LocalDate.now().plusDays(1), LocalDate.now().plusDays(30), CourseStatus.OPEN);
 
-        given(courseService.getCourses(null)).willReturn(List.of(response));
+        given(courseService.getCourses(any(), any(), any(), any(), any(), any(), any())).willReturn(List.of(response));
 
         mockMvc.perform(get("/api/courses"))
                 .andExpect(status().isOk())
@@ -122,5 +122,17 @@ class CourseControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("강의 생성 - 요청 본문(Body)이 완전히 비어있을 때 400 반환")
+    void createCourse_shouldReturn400WhenBodyEmpty() throws Exception {
+        mockMvc.perform(post("/api/courses")
+                        .header("X-User-Id", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("요청 본문(Request Body)이 누락되었거나 JSON 형식이 잘못되었습니다"));
     }
 }

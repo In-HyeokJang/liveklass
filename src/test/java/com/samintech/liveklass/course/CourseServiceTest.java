@@ -128,7 +128,7 @@ class CourseServiceTest {
                 .startDate(LocalDate.now().plusDays(1)).endDate(LocalDate.now().plusDays(30))
                 .status(CourseStatus.DRAFT).build();
 
-        given(courseRepository.findById(10L)).willReturn(Optional.of(draftCourse));
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(draftCourse));
         given(enrollmentRepository.countByCourseIdAndStatusIn(any(), any())).willReturn(0);
 
         CourseResponse result = courseService.updateStatus(10L, 1L, CourseStatus.OPEN);
@@ -139,7 +139,7 @@ class CourseServiceTest {
     @Test
     @DisplayName("본인이 아닌 사용자가 상태 변경 시도 시 예외 발생")
     void updateStatus_shouldThrowWhenNotCreator() {
-        given(courseRepository.findById(10L)).willReturn(Optional.of(openCourse));
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(openCourse));
 
         assertThatThrownBy(() -> courseService.updateStatus(10L, 2L, CourseStatus.CLOSED))
                 .isInstanceOf(BusinessException.class)
@@ -155,7 +155,7 @@ class CourseServiceTest {
                 .startDate(LocalDate.now().plusDays(1)).endDate(LocalDate.now().plusDays(30))
                 .status(CourseStatus.CLOSED).build();
 
-        given(courseRepository.findById(10L)).willReturn(Optional.of(closedCourse));
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(closedCourse));
 
         assertThatThrownBy(() -> courseService.updateStatus(10L, 1L, CourseStatus.OPEN))
                 .isInstanceOf(BusinessException.class)
@@ -165,21 +165,43 @@ class CourseServiceTest {
     @Test
     @DisplayName("강의 목록 조회 시 신청 인원이 포함된다")
     void getCourses_shouldIncludeEnrollmentCount() {
-        given(courseRepository.findByStatus(CourseStatus.OPEN)).willReturn(List.of(openCourse));
+        given(courseRepository.searchCourses(CourseStatus.OPEN, null, null, null, null, null)).willReturn(List.of(openCourse));
         Object[] row = {10L, 5L};
         given(enrollmentRepository.countByCourseIdsAndStatusIn(any(), any()))
                 .willReturn(java.util.Collections.singletonList(row));
 
-        List<CourseResponse> result = courseService.getCourses(CourseStatus.OPEN);
+        List<CourseResponse> result = courseService.getCourses(CourseStatus.OPEN, null, null, null, null, null, null);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).enrolledCount()).isEqualTo(5);
     }
 
     @Test
+    @DisplayName("고급 필터 조건에 맞게 강의 목록을 조회하고 남은 정원 필터를 처리한다")
+    void getCourses_advancedFilters_shouldWork() {
+        Course freeCourse = Course.builder()
+                .id(11L).creator(creator).title("무료 Java 기초").description("설명")
+                .price(0).capacity(5)
+                .startDate(LocalDate.now()).endDate(LocalDate.now().plusDays(30))
+                .status(CourseStatus.OPEN).build();
+
+        given(courseRepository.searchCourses(CourseStatus.OPEN, "Java", 0, 10000, null, null))
+                .willReturn(List.of(freeCourse));
+
+        Object[] row = {11L, 5L};
+        given(enrollmentRepository.countByCourseIdsAndStatusIn(any(), any()))
+                .willReturn(java.util.Collections.singletonList(row));
+
+        List<CourseResponse> result = courseService.getCourses(
+                CourseStatus.OPEN, "Java", 0, 10000, null, null, true);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     @DisplayName("강의 상세 조회 - 존재하지 않는 강의 예외")
     void getCourse_shouldThrowWhenNotFound() {
-        given(courseRepository.findById(999L)).willReturn(Optional.empty());
+        given(courseRepository.findByIdWithCreator(999L)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> courseService.getCourse(999L))
                 .isInstanceOf(BusinessException.class)
@@ -189,7 +211,7 @@ class CourseServiceTest {
     @Test
     @DisplayName("크리에이터 전용 수강생 목록 - 다른 사용자 접근 시 예외")
     void getCourseEnrollments_shouldThrowWhenNotCreator() {
-        given(courseRepository.findById(10L)).willReturn(Optional.of(openCourse));
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(openCourse));
 
         assertThatThrownBy(() -> courseService.updateStatus(10L, otherUser.getId(), CourseStatus.CLOSED))
                 .isInstanceOf(BusinessException.class)

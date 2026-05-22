@@ -31,20 +31,41 @@
 
 ## 실행 방법
 
-### 사전 준비: Docker로 PostgreSQL 실행
+### Docker로 한 번에 실행 (권장)
 
 ```bash
 docker compose up -d
 ```
 
-`postgres:15` 컨테이너가 `localhost:5432`로 실행됩니다.  
-DB/계정 설정은 `docker-compose.yml` 참고 (기본값: postgres/postgres/liveklass).
-
-### 애플리케이션 실행
+PostgreSQL + Spring Boot 앱이 함께 실행됩니다.  
+앱 시작까지 약 30~60초 소요됩니다 (PostgreSQL 준비 완료 후 앱이 자동 기동).
 
 ```bash
+# 상태 확인
+docker compose ps
+
+# 로그 확인
+docker compose logs -f app
+```
+
+### 로컬 개발 환경에서 실행 (IntelliJ / Gradle)
+
+```bash
+# 1. PostgreSQL만 먼저 실행
+docker compose up -d postgres
+
+# 2. 앱 실행 (터미널 또는 IntelliJ ▶ 버튼)
 ./gradlew bootRun
 ```
+
+### 종료
+
+```bash
+docker compose down          # 컨테이너 중지 및 제거
+docker compose down -v       # 볼륨(DB 데이터)까지 완전 삭제
+```
+
+---
 
 서버 기동 시 시드 데이터가 자동 생성됩니다:
 
@@ -74,7 +95,7 @@ http://localhost:8080/swagger-ui/index.html
 | 취소 기간 | CONFIRMED 후 7일 이내만 취소 가능. PENDING은 기간 제한 없이 취소 가능 |
 | 정원 계산 | PENDING + CONFIRMED 상태 수강 신청 수를 기준으로 정원 체크 (CANCELLED 제외) |
 | 동시성 | 마지막 자리 경합 시 비관적 락으로 정원 초과 방지 |
-| 사용자 등록 | API 미구현, 시드 데이터로 대체 |
+| 사용자 등록 | `POST /api/users`로 CREATOR/CLASSMATE 계정 직접 생성 가능 (시드 데이터 병행) |
 
 ---
 
@@ -116,7 +137,17 @@ com.samintech.liveklass
 
 계층별 분리(controller/service/repository)보다 도메인별 응집도가 높아 기능 수정 시 파일 탐색 범위가 좁습니다.
 
-### 4. N+1 쿼리 방지 — 배치 COUNT 쿼리
+### 4. 취소 후 재신청 — DB 유니크 제약 우회
+
+`enrollments` 테이블에는 `(user_id, course_id)` 복합 유니크 제약이 있습니다. 취소 후 재신청 시 새 row를 INSERT하면 제약 위반이 발생하므로, 기존 `CANCELLED` row를 재활성화(`reactivate()`)하는 방식으로 처리합니다.
+
+```
+재신청 흐름:
+  기존 CANCELLED row 있음 → status=PENDING, enrolledAt=now(), confirmedAt=null, cancelledAt=null 로 갱신
+  기존 CANCELLED row 없음 → 새 row INSERT
+```
+
+### 5. N+1 쿼리 방지 — 배치 COUNT 쿼리
 
 강의 목록 조회(`getCourses`) 시 각 강의별 신청 인원을 개별 쿼리로 조회하는 대신, 하나의 GROUP BY 쿼리로 한 번에 처리합니다.
 
@@ -134,7 +165,6 @@ GROUP BY e.course_id
 
 | 항목 | 이유 |
 |------|------|
-| 사용자 등록 API | 시드 데이터(DataInitializer)로 대체 |
 | JWT 인증 | 과제에서 X-User-Id 헤더 방식 명시적으로 허용 |
 | 이메일/비밀번호 | User 엔티티가 username, role만 보유 |
 
@@ -160,15 +190,52 @@ Claude (claude-sonnet-4-6)를 활용하여 전체 프로젝트 골격 생성 및
 
 ## API 목록 및 예시
 
+### 사용자 API
+
+| Method | URL | 설명 | 필요 역할 |
+|--------|-----|------|-----------|
+| `POST` | `/api/users` | 사용자 등록 (CREATOR 또는 CLASSMATE) | 누구나 |
+
+#### 사용자 등록
+```http
+POST /api/users
+Content-Type: application/json
+
+{ "username": "newStudent", "role": "CLASSMATE" }
+```
+```json
+{ "success": true, "data": { "id": 6, "username": "newStudent", "role": "CLASSMATE" }, "message": null }
+```
+
+---
+
 ### 강의 API
 
 | Method | URL | 설명 | 필요 역할 |
 |--------|-----|------|-----------|
 | `POST` | `/api/courses` | 강의 등록 | CREATOR |
-| `GET` | `/api/courses?status=OPEN` | 강의 목록 (상태 필터 선택) | 누구나 |
+| `GET` | `/api/courses` | 강의 목록 (다중 필터 선택) | 누구나 |
 | `GET` | `/api/courses/{id}` | 강의 상세 | 누구나 |
 | `PATCH` | `/api/courses/{id}/status` | 상태 변경 (본인 강의만) | CREATOR |
 | `GET` | `/api/courses/{id}/enrollments` | 수강생 목록 (본인 강의만) | CREATOR |
+
+#### 강의 목록 조회 (필터 파라미터)
+
+| 파라미터 | 타입 | 설명 | 예시 |
+|---------|------|------|------|
+| `status` | `DRAFT\|OPEN\|CLOSED` | 강의 상태 필터 | `?status=OPEN` |
+| `title` | `String` | 제목 키워드 검색 (대소문자 무관) | `?title=java` |
+| `minPrice` | `Integer` | 최소 가격 | `?minPrice=0` |
+| `maxPrice` | `Integer` | 최대 가격 | `?maxPrice=50000` |
+| `startDate` | `yyyy-MM-dd` | 강의 시작일 이후 | `?startDate=2026-06-01` |
+| `endDate` | `yyyy-MM-dd` | 강의 종료일 이전 | `?endDate=2026-12-31` |
+| `hasVacancies` | `Boolean` | `true`이면 빈 자리 있는 강의만 | `?hasVacancies=true` |
+
+```http
+GET /api/courses?status=OPEN&title=spring&minPrice=0&maxPrice=100000&hasVacancies=true
+```
+
+---
 
 #### 강의 등록
 ```http
@@ -284,9 +351,13 @@ X-User-Id: 3
 | `INVALID_DATE_RANGE` | 400 | 시작일은 종료일보다 이전이어야 합니다 |
 | `CANCEL_PERIOD_EXCEEDED` | 400 | 취소 가능 기간(결제 후 7일)이 지났습니다 |
 | `ENROLLMENT_NOT_CANCELLABLE` | 400 | 취소할 수 없는 수강 신청 상태입니다 |
-| `ENROLLMENT_NOT_CONFIRMABLE` | 400 | 결제 확정할 수 없는 수강 신청 상태입니다 |
+| `ENROLLMENT_NOT_CONFIRMABLE` | 400 | 결제 확정할 수 없는 수강 신청 상태입니다 (기타) |
+| `ENROLLMENT_ALREADY_CONFIRMED` | 400 | 이미 결제 완료된 강의입니다 |
+| `ENROLLMENT_WAITLISTED_NOT_CONFIRMABLE` | 400 | 대기 중인 상태에서는 결제를 진행할 수 없습니다 |
+| `ENROLLMENT_CANCELLED_NOT_CONFIRMABLE` | 400 | 취소된 수강 신청은 결제할 수 없습니다 |
 | `COURSE_FULL` | 409 | 강의 정원이 초과되었습니다 (현재 미사용 — 정원 초과 시 WAITLISTED로 등록) |
 | `ALREADY_ENROLLED` | 409 | 이미 신청한 강의입니다 |
+| `USER_ALREADY_EXISTS` | 409 | 이미 존재하는 사용자 이름입니다 |
 | `NOT_COURSE_CREATOR` | 403 | 강의 개설자만 접근할 수 있습니다 |
 | `NOT_ENROLLMENT_OWNER` | 403 | 본인의 수강 신청만 처리할 수 있습니다 |
 | `UNAUTHORIZED_ROLE` | 403 | 해당 작업을 수행할 권한이 없습니다 |
@@ -322,7 +393,7 @@ enrollments
   enrolled_at (TIMESTAMP, NOT NULL)   -- 대기열 진입 시간 기준 FIFO 정렬
   confirmed_at (TIMESTAMP)
   cancelled_at (TIMESTAMP)
-  UNIQUE (user_id, course_id)   -- 중복 신청 방지 (CANCELLED 후 재신청 시 DB 제약 주의)
+  UNIQUE (user_id, course_id)   -- 중복 신청 방지 (CANCELLED 후 재신청 시 새 INSERT 대신 기존 row reactivate)
 ```
 
 **대기열 정책**
@@ -354,6 +425,7 @@ users (1) ──< courses (1) ──< enrollments >── (1) users
 |---|---|---|---|
 | `LiveKlassApplicationTests` | 통합 | 1 | 애플리케이션 컨텍스트 로드 |
 | `CourseControllerTest` | MockMvc | 6 | API 요청/응답 형식, 유효성 검증 |
-| `CourseServiceTest` | 단위 | 10 | 강의 생성·조회·상태 변경, 역할 검증, 날짜 검증 |
-| `EnrollmentServiceTest` | 단위 | 13 | 신청·확정·취소·대기열 비즈니스 규칙, 역할 검증 |
+| `CourseServiceTest` | 단위 | 11 | 강의 생성·조회·상태 변경·고급 필터, 역할 검증, 날짜 검증 |
+| `EnrollmentServiceTest` | 단위 | 17 | 신청·확정·취소·대기열·재신청·동시취소·상태별 확정 오류, 역할 검증 |
 | `EnrollmentConcurrencyTest` | 통합 | 1 | 동시 신청 시 정원 초과 방지 (비관적 락) |
+| `UserServiceTest` | 단위 | 2 | 사용자 등록, 중복 username 거부 |
