@@ -31,9 +31,48 @@
 
 ## 실행 방법
 
+### 사전 요구사항
+
+| 실행 방법 | 필요 도구 |
+|-----------|-----------|
+| Docker (권장) | [Docker Desktop](https://www.docker.com/products/docker-desktop/) |
+| 로컬 직접 실행 | [Docker Desktop](https://www.docker.com/products/docker-desktop/) + [Java 21](https://adoptium.net/) |
+
+> Docker Desktop이 실행 중이어야 `docker` 명령어가 동작합니다.
+
+#### 포트 충돌 확인 (실행 전)
+
+본 프로젝트는 **8080 (앱)**, **5432 (PostgreSQL)** 포트를 사용합니다.  
+이미 사용 중인 포트가 있으면 컨테이너가 실행되지 않으니 아래 명령어로 미리 확인하세요.
+
+```bash
+# Mac / Linux
+lsof -i :8080
+lsof -i :5432
+
+# Windows (PowerShell)
+netstat -ano | findstr :8080
+netstat -ano | findstr :5432
+```
+
+출력 결과가 있으면 해당 프로세스를 종료하거나, `docker-compose.yml`의 포트 번호를 변경하세요.
+
+```yaml
+# docker-compose.yml 포트 변경 예시 (왼쪽이 호스트 포트)
+ports:
+  - "8081:8080"   # 8081로 변경 시 http://localhost:8081 로 접속
+```
+
+---
+
 ### Docker로 한 번에 실행 (권장)
 
 ```bash
+# 1. 저장소 클론
+git clone <repository-url>
+cd liveklass
+
+# 2. 실행
 docker compose up -d
 ```
 
@@ -41,22 +80,51 @@ PostgreSQL + Spring Boot 앱이 함께 실행됩니다.
 앱 시작까지 약 30~60초 소요됩니다 (PostgreSQL 준비 완료 후 앱이 자동 기동).
 
 ```bash
+# 기동 완료 확인 (아래 메시지가 보이면 준비 완료)
+docker compose logs app | grep "Started LiveKlassApplication"
+```
+
+**기동 완료 후 Swagger UI에서 API를 바로 테스트할 수 있습니다:**
+
+```
+http://localhost:8080/swagger-ui/index.html
+```
+
+또는 빠른 동작 확인:
+
+```bash
+curl http://localhost:8080/api/courses
+```
+
+```bash
 # 상태 확인
 docker compose ps
 
-# 로그 확인
+# 전체 로그 확인
 docker compose logs -f app
 ```
 
+---
+
 ### 로컬 개발 환경에서 실행 (IntelliJ / Gradle)
 
+> **PostgreSQL을 먼저 실행해야 합니다.** DB 없이 앱을 실행하면 `Connection refused` 에러가 발생합니다.
+
 ```bash
-# 1. PostgreSQL만 먼저 실행
+# 1. PostgreSQL 먼저 실행 (필수)
 docker compose up -d postgres
 
-# 2. 앱 실행 (터미널 또는 IntelliJ ▶ 버튼)
-./gradlew bootRun
+# 2. postgres가 healthy 상태인지 확인
+docker compose ps
+
+# 3. 앱 실행
+./gradlew bootRun        # Mac / Linux
+gradlew.bat bootRun      # Windows
 ```
+
+IntelliJ에서는 `docker compose up -d postgres` 실행 후 `LiveKlassApplication.java`의 ▶ 버튼으로 실행해도 됩니다.
+
+---
 
 ### 종료
 
@@ -85,12 +153,6 @@ docker compose down -v       # 볼륨(DB 데이터)까지 완전 삭제
 | 3 | 초보자를 위한 HTML/CSS 기초 | DRAFT | 30 |
 | 4 | React & Next.js 프론트엔드 실무 | CLOSED | 20 |
 | 5 | 알고리즘 및 자료구조 코딩테스트 | OPEN | 5 |
-
-### Swagger UI
-
-```
-http://localhost:8080/swagger-ui/index.html
-```
 
 ---
 
