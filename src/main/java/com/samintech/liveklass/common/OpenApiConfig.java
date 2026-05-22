@@ -26,7 +26,7 @@ public class OpenApiConfig {
                                 "정원 초과 시: `WAITLISTED → PENDING` (앞 수강생 취소 시 자동 승격)\n\n" +
                                 "## 강의 목록 조회 필터 (`GET /api/courses`)\n" +
                                 "`status`, `title`, `minPrice`, `maxPrice`, `startDate`, `endDate`, `hasVacancies` 조합 가능\n\n" +
-                                "## 시드 데이터 (서버 기동 시 자동 생성 — 재시작 시 초기화됨)\n" +
+                                "## 시드 데이터 (서버 최초 기동 시 자동 생성 — 이미 데이터가 있으면 건너뜀)\n" +
                                 "**사용자**\n\n" +
                                 "| ID | username | role |\n" +
                                 "|---|---|---|\n" +
