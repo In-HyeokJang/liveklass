@@ -199,6 +199,63 @@ class CourseServiceTest {
     }
 
     @Test
+    @DisplayName("강의 수정 성공 - DRAFT 상태에서 제목/날짜 변경")
+    void updateCourse_shouldSucceed() {
+        Course draftCourse = Course.builder()
+                .id(10L).creator(creator).title("기존 제목").description("설명")
+                .price(10000).capacity(20)
+                .startDate(LocalDate.now().plusDays(5)).endDate(LocalDate.now().plusDays(30))
+                .status(CourseStatus.DRAFT).build();
+
+        CourseUpdateRequest request = new CourseUpdateRequest(
+                "새 제목", "새 설명", 20000, 15,
+                LocalDate.now().plusDays(7), LocalDate.now().plusDays(40));
+
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(draftCourse));
+        given(enrollmentRepository.countByCourseIdAndStatusIn(any(), any())).willReturn(0);
+
+        CourseResponse result = courseService.updateCourse(10L, 1L, request);
+
+        assertThat(result.title()).isEqualTo("새 제목");
+        assertThat(result.price()).isEqualTo(20000);
+    }
+
+    @Test
+    @DisplayName("OPEN 상태 강의 수정 시도 시 예외 발생")
+    void updateCourse_shouldThrowWhenNotDraft() {
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(openCourse));
+
+        CourseUpdateRequest request = new CourseUpdateRequest(
+                "제목", "설명", 0, 10,
+                LocalDate.now().plusDays(1), LocalDate.now().plusDays(30));
+
+        assertThatThrownBy(() -> courseService.updateCourse(10L, 1L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.COURSE_NOT_EDITABLE.getMessage());
+    }
+
+    @Test
+    @DisplayName("수강 인원보다 정원을 줄이려 할 때 예외 발생")
+    void updateCourse_shouldThrowWhenCapacityBelowEnrolled() {
+        Course draftCourse = Course.builder()
+                .id(10L).creator(creator).title("강의").description("설명")
+                .price(0).capacity(10)
+                .startDate(LocalDate.now().plusDays(1)).endDate(LocalDate.now().plusDays(30))
+                .status(CourseStatus.DRAFT).build();
+
+        CourseUpdateRequest request = new CourseUpdateRequest(
+                "강의", "설명", 0, 2,  // 정원을 2로 줄이려 함
+                LocalDate.now().plusDays(1), LocalDate.now().plusDays(30));
+
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(draftCourse));
+        given(enrollmentRepository.countByCourseIdAndStatusIn(any(), any())).willReturn(5); // 현재 5명 수강 중
+
+        assertThatThrownBy(() -> courseService.updateCourse(10L, 1L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.CAPACITY_BELOW_ENROLLED.getMessage());
+    }
+
+    @Test
     @DisplayName("강의 상세 조회 - 존재하지 않는 강의 예외")
     void getCourse_shouldThrowWhenNotFound() {
         given(courseRepository.findByIdWithCreator(999L)).willReturn(Optional.empty());
@@ -206,6 +263,23 @@ class CourseServiceTest {
         assertThatThrownBy(() -> courseService.getCourse(999L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.COURSE_NOT_FOUND.getMessage());
+    }
+
+    @Test
+    @DisplayName("종료일이 지난 강의를 OPEN으로 변경 시도 시 예외 발생")
+    void updateStatus_shouldThrowWhenOpeningExpiredCourse() {
+        Course expiredCourse = Course.builder()
+                .id(10L).creator(creator).title("강의").description("설명")
+                .price(0).capacity(10)
+                .startDate(LocalDate.now().minusDays(30))
+                .endDate(LocalDate.now().minusDays(1)) // 어제 종료
+                .status(CourseStatus.DRAFT).build();
+
+        given(courseRepository.findByIdWithCreator(10L)).willReturn(Optional.of(expiredCourse));
+
+        assertThatThrownBy(() -> courseService.updateStatus(10L, 1L, CourseStatus.OPEN))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.COURSE_EXPIRED.getMessage());
     }
 
     @Test

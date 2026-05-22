@@ -104,6 +104,21 @@ class EnrollmentServiceTest {
                 .hasMessage(ErrorCode.COURSE_NOT_ENROLLABLE.getMessage());
     }
 
+    @Test
+    @DisplayName("수강 기간이 지난 강의(OPEN 상태이지만 endDate 경과) 신청 시 예외 발생")
+    void enroll_shouldThrowWhenCourseExpired() {
+        Course expiredCourse = Course.builder()
+                .id(10L).creator(null).title("강의").description("설명")
+                .price(0).capacity(10)
+                .startDate(LocalDate.now().minusDays(30)).endDate(LocalDate.now().minusDays(1))
+                .status(CourseStatus.OPEN).build(); // OPEN이지만 endDate 경과
+
+        given(courseRepository.findByIdWithLock(10L)).willReturn(Optional.of(expiredCourse));
+
+        assertThatThrownBy(() -> enrollmentService.enroll(10L, 2L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.COURSE_EXPIRED.getMessage());
+    }
 
     @Test
     @DisplayName("정원 초과 시 대기열(WAITLISTED)로 등록")

@@ -67,15 +67,24 @@ docker compose down -v       # 볼륨(DB 데이터)까지 완전 삭제
 
 ---
 
-서버 기동 시 시드 데이터가 자동 생성됩니다:
+서버 최초 기동 시 시드 데이터가 자동 생성됩니다 (이미 데이터가 있으면 건너뜀):
+
+**사용자 (20명)**
 
 | ID | username | role |
 |----|----------|------|
-| 1 | creator1 | CREATOR |
-| 2 | creator2 | CREATOR |
-| 3 | student1 | CLASSMATE |
-| 4 | student2 | CLASSMATE |
-| 5 | student3 | CLASSMATE |
+| 1 ~ 5 | creator1 ~ creator5 | CREATOR |
+| 6 ~ 20 | student1 ~ student15 | CLASSMATE |
+
+**강의 (5개)**
+
+| ID | 제목 | 상태 | 정원 |
+|----|------|------|------|
+| 1 | 실시간 Java 마스터 클래스 | OPEN | 10 |
+| 2 | Spring Boot JPA 심화 과정 | OPEN | 2 (만석 + 대기열) |
+| 3 | 초보자를 위한 HTML/CSS 기초 | DRAFT | 30 |
+| 4 | React & Next.js 프론트엔드 실무 | CLOSED | 20 |
+| 5 | 알고리즘 및 자료구조 코딩테스트 | OPEN | 5 |
 
 ### Swagger UI
 
@@ -158,6 +167,19 @@ SELECT e.course_id, COUNT(e.*) FROM enrollments e
 WHERE e.course_id IN (?, ?, ...) AND e.status IN ('PENDING', 'CONFIRMED')
 GROUP BY e.course_id
 ```
+### 6. 만료 강의 자동 CLOSED — 2-레이어 방어
+
+스케줄러 단독은 서버 다운 중 누락이 발생하므로 두 가지를 함께 사용합니다.
+
+```
+레이어 1 (서버 재기동 시) — CourseExpiryCloser
+  endDate가 지난 OPEN 강의를 일괄 CLOSED로 전환
+  → 서버 중단 기간의 누락분을 재기동 시 즉시 보완
+
+레이어 2 (수강 신청 요청 시) — EnrollmentService.enroll()
+  DB 상태와 무관하게 endDate < 오늘이면 COURSE_EXPIRED 반환
+  → 극단적인 레이스 컨디션 방어
+```
 
 ---
 
@@ -172,19 +194,29 @@ GROUP BY e.course_id
 
 ## AI 활용 범위
 
-Claude (claude-sonnet-4-6)를 활용하여 전체 프로젝트 골격 생성 및 코드 리뷰를 진행했습니다.
+본 프로젝트는 **Claude (Anthropic)** 와의 AI 페어 프로그래밍 방식으로 개발되었습니다.
 
-**AI가 생성한 주요 결과물**
-- 엔티티, 서비스, 컨트롤러, 리포지토리 전체 구조
-- 테스트 코드 (단위 + 통합 + 동시성)
-- 오류 처리 공통 구조 (GlobalExceptionHandler, ErrorCode)
+### 본인 기여
 
-**직접 검토·결정한 사항**
-- 비관적 락 vs 낙관적 락 트레이드오프 이해 후 비관적 락 선택
-- 상태 전이 검증 위치 (서비스 vs 엔티티) → 엔티티 내부 결정
-- 취소 가능 기간 규칙 (PENDING vs CONFIRMED 분기 처리)
-- UserRole 기반 접근 제어 범위 결정
-- 테스트 케이스 경계값 및 시나리오 검토
+| 영역 | 내용 |
+|------|------|
+| 프로젝트 초기 설정 | Spring Boot 프로젝트 구성, 의존성 선택, Gradle 설정 |
+| 기술 스택 결정 | Java 21, Spring Data JPA, PostgreSQL(운영) + H2(테스트), X-User-Id 헤더 인증 방식 채택 |
+| 요구사항 해석 | 정원 초과 시 대기열 등록, 취소 후 7일 정책, FIFO 승격 방식 등 비즈니스 정책 결정 |
+| 코드 리뷰 | 구현 결과물 검토, 버그 3건 발견(재신청 유니크 위반 / 동시 취소 대기열 누락 / N+1) 및 수정 지시 |
+| 성능 개선 식별 | 강의 단건 조회 시 Creator 지연 로딩으로 인한 쿼리 3회 발생 문제를 발견하고 `findByIdWithCreator()` 도입 지시 |
+| 시드 데이터 설계 | 대기열 포화 시나리오, 페이지네이션 검증용 다수 신청 등 테스트 시나리오 직접 설계 |
+| API 검증 | Swagger UI를 통한 전체 플로우(생성→OPEN→신청→만석→취소→승격) 수동 검증 |
+| Docker 환경 | Docker Compose multi-stage 빌드 및 PostgreSQL healthcheck 구성 결정 |
+
+### AI 활용 내용
+
+| 영역 | 내용 |
+|------|------|
+| 비즈니스 로직 구현 | 엔티티 상태 머신, 서비스 레이어 전체, Repository 쿼리 작성 |
+| 테스트 코드 | 단위 테스트(Mockito), MockMvc 통합 테스트, 가상 스레드 동시성 테스트 |
+| DB 스키마 | DDL, 유니크 제약, 인덱스 설계 |
+| 문서화 | Swagger 설정, Javadoc, README 초안 |
 
 ---
 
@@ -216,6 +248,7 @@ Content-Type: application/json
 | `POST` | `/api/courses` | 강의 등록 | CREATOR |
 | `GET` | `/api/courses` | 강의 목록 (다중 필터 선택) | 누구나 |
 | `GET` | `/api/courses/{id}` | 강의 상세 | 누구나 |
+| `PATCH` | `/api/courses/{id}` | 강의 수정 (DRAFT 상태만) | CREATOR |
 | `PATCH` | `/api/courses/{id}/status` | 상태 변경 (본인 강의만) | CREATOR |
 | `GET` | `/api/courses/{id}/enrollments` | 수강생 목록 (본인 강의만) | CREATOR |
 
@@ -302,7 +335,7 @@ Content-Type: application/json
 #### 수강 신청
 ```http
 POST /api/enrollments
-X-User-Id: 3
+X-User-Id: 6
 Content-Type: application/json
 
 { "courseId": 1 }
@@ -314,7 +347,7 @@ Content-Type: application/json
     "id": 1,
     "courseId": 1,
     "courseTitle": "Spring Boot 마스터",
-    "userId": 3,
+    "userId": 6,
     "username": "student1",
     "status": "PENDING",
     "enrolledAt": "2026-05-20T10:00:00",
@@ -328,13 +361,13 @@ Content-Type: application/json
 #### 결제 확정
 ```http
 PATCH /api/enrollments/1/confirm
-X-User-Id: 3
+X-User-Id: 6
 ```
 
 #### 수강 취소
 ```http
 DELETE /api/enrollments/1
-X-User-Id: 3
+X-User-Id: 6
 ```
 
 ---
@@ -346,8 +379,11 @@ X-User-Id: 3
 | `COURSE_NOT_FOUND` | 404 | 강의를 찾을 수 없습니다 |
 | `USER_NOT_FOUND` | 404 | 사용자를 찾을 수 없습니다 |
 | `ENROLLMENT_NOT_FOUND` | 404 | 수강 신청을 찾을 수 없습니다 |
-| `COURSE_NOT_ENROLLABLE` | 400 | 신청 가능한 강의가 아닙니다 (OPEN 상태 아님) |
-| `INVALID_STATUS_TRANSITION` | 400 | 유효하지 않은 상태 변경입니다 |
+| `COURSE_NOT_ENROLLABLE` | 400 | 신청 가능한 강의가 아닙니다 |
+| `COURSE_EXPIRED` | 400 | 수강 기간이 종료된 강의입니다 |
+| `COURSE_NOT_EDITABLE` | 400 | DRAFT 상태의 강의만 수정할 수 있습니다 |
+| `CAPACITY_BELOW_ENROLLED` | 400 | 현재 수강 인원보다 정원을 줄일 수 없습니다 |
+| `INVALID_STATUS_TRANSITION` | 400 | 강의 상태는 DRAFT→OPEN→CLOSED 순서로만 변경 가능합니다 |
 | `INVALID_DATE_RANGE` | 400 | 시작일은 종료일보다 이전이어야 합니다 |
 | `CANCEL_PERIOD_EXCEEDED` | 400 | 취소 가능 기간(결제 후 7일)이 지났습니다 |
 | `ENROLLMENT_NOT_CANCELLABLE` | 400 | 취소할 수 없는 수강 신청 상태입니다 |
@@ -355,7 +391,6 @@ X-User-Id: 3
 | `ENROLLMENT_ALREADY_CONFIRMED` | 400 | 이미 결제 완료된 강의입니다 |
 | `ENROLLMENT_WAITLISTED_NOT_CONFIRMABLE` | 400 | 대기 중인 상태에서는 결제를 진행할 수 없습니다 |
 | `ENROLLMENT_CANCELLED_NOT_CONFIRMABLE` | 400 | 취소된 수강 신청은 결제할 수 없습니다 |
-| `COURSE_FULL` | 409 | 강의 정원이 초과되었습니다 (현재 미사용 — 정원 초과 시 WAITLISTED로 등록) |
 | `ALREADY_ENROLLED` | 409 | 이미 신청한 강의입니다 |
 | `USER_ALREADY_EXISTS` | 409 | 이미 존재하는 사용자 이름입니다 |
 | `NOT_COURSE_CREATOR` | 403 | 강의 개설자만 접근할 수 있습니다 |
@@ -425,7 +460,7 @@ users (1) ──< courses (1) ──< enrollments >── (1) users
 |---|---|---|---|
 | `LiveKlassApplicationTests` | 통합 | 1 | 애플리케이션 컨텍스트 로드 |
 | `CourseControllerTest` | MockMvc | 6 | API 요청/응답 형식, 유효성 검증 |
-| `CourseServiceTest` | 단위 | 11 | 강의 생성·조회·상태 변경·고급 필터, 역할 검증, 날짜 검증 |
-| `EnrollmentServiceTest` | 단위 | 17 | 신청·확정·취소·대기열·재신청·동시취소·상태별 확정 오류, 역할 검증 |
+| `CourseServiceTest` | 단위 | 14 | 강의 생성·수정·조회·상태 변경·고급 필터, 역할 검증, 날짜 검증, 만료 강의 OPEN 차단 |
+| `EnrollmentServiceTest` | 단위 | 18 | 신청·확정·취소·대기열·재신청·동시취소·상태별 확정 오류, 역할 검증, 만료 강의 차단 |
 | `EnrollmentConcurrencyTest` | 통합 | 1 | 동시 신청 시 정원 초과 방지 (비관적 락) |
 | `UserServiceTest` | 단위 | 2 | 사용자 등록, 중복 username 거부 |

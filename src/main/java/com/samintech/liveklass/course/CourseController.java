@@ -63,6 +63,15 @@ public class CourseController {
         return ResponseEntity.ok(ApiResponse.success(courseService.getCourse(id)));
     }
 
+    @PatchMapping("/{id}")
+    public ResponseEntity<ApiResponse<CourseResponse>> updateCourse(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestBody @Validated CourseUpdateRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                courseService.updateCourse(id, userId, request)));
+    }
+
     @PatchMapping("/{id}/status")
     public ResponseEntity<ApiResponse<CourseResponse>> updateStatus(
             @PathVariable Long id,

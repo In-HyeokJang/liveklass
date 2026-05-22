@@ -28,7 +28,10 @@ public enum ErrorCode {
     ENROLLMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "수강 신청을 찾을 수 없습니다"),
 
     COURSE_NOT_ENROLLABLE(HttpStatus.BAD_REQUEST, "신청 가능한 강의가 아닙니다."),
-    INVALID_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "유효하지 않은 상태 변경입니다"),
+    COURSE_EXPIRED(HttpStatus.BAD_REQUEST, "수강 기간이 종료된 강의입니다"),
+    COURSE_NOT_EDITABLE(HttpStatus.BAD_REQUEST, "DRAFT 상태의 강의만 수정할 수 있습니다"),
+    CAPACITY_BELOW_ENROLLED(HttpStatus.BAD_REQUEST, "현재 수강 인원보다 정원을 줄일 수 없습니다"),
+    INVALID_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "강의 상태는 DRAFT→OPEN→CLOSED 순서로만 변경 가능합니다"),
     INVALID_DATE_RANGE(HttpStatus.BAD_REQUEST, "시작일은 종료일보다 이전이어야 합니다"),
     CANCEL_PERIOD_EXCEEDED(HttpStatus.BAD_REQUEST, "취소 가능 기간(결제 후 7일)이 지났습니다"),
     ENROLLMENT_NOT_CANCELLABLE(HttpStatus.BAD_REQUEST, "취소할 수 없는 수강 신청 상태입니다"),
