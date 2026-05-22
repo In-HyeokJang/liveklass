@@ -105,6 +105,35 @@ public class CourseService {
                 .toList();
     }
 
+    /**
+     * 강의 내용 수정. DRAFT 상태일 때만 허용.
+     * 정원을 현재 수강 인원보다 줄이거나, 종료일을 시작일보다 앞으로 설정하는 것은 거부.
+     */
+    @Transactional
+    public CourseResponse updateCourse(Long courseId, Long userId, CourseUpdateRequest request) {
+        Course course = courseRepository.findByIdWithCreator(courseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
+
+        if (!course.getCreator().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.NOT_COURSE_CREATOR);
+        }
+        if (course.getStatus() != CourseStatus.DRAFT) {
+            throw new BusinessException(ErrorCode.COURSE_NOT_EDITABLE);
+        }
+        if (request.startDate().isAfter(request.endDate())) {
+            throw new BusinessException(ErrorCode.INVALID_DATE_RANGE);
+        }
+
+        int activeCount = enrollmentRepository.countByCourseIdAndStatusIn(courseId, ACTIVE_STATUSES);
+        if (request.capacity() < activeCount) {
+            throw new BusinessException(ErrorCode.CAPACITY_BELOW_ENROLLED);
+        }
+
+        course.update(request.title(), request.description(), request.price(),
+                request.capacity(), request.startDate(), request.endDate());
+        return CourseResponse.from(course, activeCount);
+    }
+
     /** 강의 단건 상세 조회 (크리에이터 정보, 생성 시각 포함) */
     public CourseDetailResponse getCourse(Long courseId) {
         Course course = courseRepository.findByIdWithCreator(courseId)
@@ -132,6 +161,10 @@ public class CourseService {
 
         if (!course.getCreator().getId().equals(userId)) {
             throw new BusinessException(ErrorCode.NOT_COURSE_CREATOR);
+        }
+
+        if (newStatus == CourseStatus.OPEN && course.isExpired()) {
+            throw new BusinessException(ErrorCode.COURSE_EXPIRED);
         }
 
         course.transitionTo(newStatus);

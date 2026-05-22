@@ -59,6 +59,10 @@ public class EnrollmentService {
             throw new BusinessException(ErrorCode.COURSE_NOT_ENROLLABLE);
         }
 
+        if (course.isExpired()) {
+            throw new BusinessException(ErrorCode.COURSE_EXPIRED);
+        }
+
         if (enrollmentRepository.existsByCourseIdAndUserIdAndStatusIn(courseId, userId, NON_CANCELLED_STATUSES)) {
             throw new BusinessException(ErrorCode.ALREADY_ENROLLED);
         }

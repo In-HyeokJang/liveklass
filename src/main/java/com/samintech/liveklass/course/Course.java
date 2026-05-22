@@ -67,6 +67,20 @@ public class Course {
      * @param newStatus 변경하고자 하는 새로운 상태
      * @throws BusinessException
      */
+    public boolean isExpired() {
+        return LocalDate.now().isAfter(this.endDate);
+    }
+
+    public void update(String title, String description, int price, int capacity,
+                       LocalDate startDate, LocalDate endDate) {
+        this.title = title;
+        this.description = description;
+        this.price = price;
+        this.capacity = capacity;
+        this.startDate = startDate;
+        this.endDate = endDate;
+    }
+
     public void transitionTo(CourseStatus newStatus) {
         if (!isValidTransition(this.status, newStatus)) {
             throw new BusinessException(ErrorCode.INVALID_STATUS_TRANSITION);

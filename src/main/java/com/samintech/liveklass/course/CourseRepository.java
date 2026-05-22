@@ -28,6 +28,8 @@ public interface CourseRepository extends JpaRepository<Course, Long> {
             @Param("endDate") LocalDate endDate
     );
 
+    List<Course> findByStatusAndEndDateBefore(CourseStatus status, LocalDate date);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT c FROM Course c WHERE c.id = :id")
     Optional<Course> findByIdWithLock(@Param("id") Long id);
